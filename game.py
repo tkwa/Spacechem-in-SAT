@@ -20,6 +20,21 @@ class BondDir(IntEnum):
     L = 2
     D = 3
 
+class Command(IntEnum):
+    NONE = 0
+    GRAB = 1
+    DROP = 2
+    # GRABDROP = 3
+    # ROTATE_CCW = 4
+    # ROTATE_CW = 5
+    # BOND_PLUS = 6
+    # BOND_MINUS = 7
+    INPUT_ALPHA = 3
+    # INPUT_BETA = 9
+    OUTPUT_PSI = 4
+    # OUTPUT_OMEGA = 11
+    # Still need to implement: flip flops, sense, fuse/split
+
 
 class Atom():
     """
@@ -87,21 +102,6 @@ class Atom():
         model.Add(self.BFS_depth[t] >= 0).OnlyEnforceIf(self.molecule_grabbed[t]) # this is the problem...
 
 # %%
-
-class Command(IntEnum):
-    NONE = 0
-    GRAB = 1
-    DROP = 2
-    # GRABDROP = 3
-    # ROTATE_CCW = 4
-    # ROTATE_CW = 5
-    # BOND_PLUS = 6
-    # BOND_MINUS = 7
-    INPUT_ALPHA = 3
-    # INPUT_BETA = 9
-    OUTPUT_PSI = 4
-    # OUTPUT_OMEGA = 11
-    # Still need to implement: flip flops, sense, fuse/split
 
 class Cell():
     def __init__(self, model:cp_model.CpModel, T, height, width, x:int, y:int, n_atom_types, max_atoms, max_bfs):
@@ -255,6 +255,14 @@ class SpacechemGame():
         self.cells:list[list[Cell]] = [[Cell(self.model, T, height, width, x, y, n_atom_types, max_atoms, max_bfs) for y in range(height)] for x in range(width)]
         self.waldos = [Waldo(self.model, T, id, height, width, max_atoms) for id in range(n_waldos)]
         # self.bonders = [[None for _ in range(height)] for _ in range(width)]
+
+        # Used for loop constraint
+        self.t_loop_start = self.model.NewIntVar(0, self.T - 1, "t_loop_start")
+        self.t_loop_end = self.model.NewIntVar(0, self.T - 1, "t_loop_end")
+        self.t_input = self.model.NewIntVar(0, self.T - 1, "t_input")
+        self.t_output = self.model.NewIntVar(0, self.T - 1, "t_output")
+        self.waldo_x_on_loop = self.model.NewIntVar(0, width - 1, "waldo_x_on_loop")
+        self.waldo_y_on_loop = self.model.NewIntVar(0, height - 1, "waldo_y_on_loop")
     
         assert n_waldos == 1, "Only one waldo is supported for now"
 
@@ -526,6 +534,38 @@ class SpacechemGame():
                 if not atom1.active or not atom2.active:
                     continue
                 assert not(atom1.x[t] == atom2.x[t] and atom1.y[t] == atom2.y[t])
+
+    def make_loop_constraint(self, require_empty_board=True):
+        """
+        Enforces that there are two times, t1 and t2, such that t1 < t2 and
+        the board and waldo states are the same at t1 and t2.
+        At least one input and one output must happen in the loop.
+        """
+        if not require_empty_board: raise NotImplementedError()
+
+        self.model.Add(self.t_loop_start < self.t_input)
+        self.model.Add(self.t_input < self.t_output)
+        self.model.Add(self.t_output < self.t_loop_end)
+        # redundant constraint
+        self.model.Add(self.t_loop_start < self.t_loop_end)
+
+        self.model.AddElement(self.t_loop_start, self.n_active_atoms, 0)
+        self.model.AddElement(self.t_loop_end, self.n_active_atoms, 0)
+
+        self.model.AddElement(self.t_input, [self.waldos[0].command[t][Command.INPUT_ALPHA] for t in range(self.T)], 1)
+        self.model.AddElement(self.t_output, [self.waldos[0].command[t][Command.OUTPUT_PSI] for t in range(self.T)], 1)
+
+        # Waldo position and movement
+        self.model.AddElement(self.t_loop_start, self.waldos[0].x, self.waldo_x_on_loop)
+        self.model.AddElement(self.t_loop_end, self.waldos[0].x, self.waldo_x_on_loop)
+        self.model.AddElement(self.t_loop_start, self.waldos[0].y, self.waldo_y_on_loop)
+        self.model.AddElement(self.t_loop_end, self.waldos[0].y, self.waldo_y_on_loop)
+        for movement in Movement:
+            movement_arr = [self.waldos[0].movement[t][movement] for t in range(self.T)]
+            waldo_movement_on_loop = self.model.NewBoolVar("waldo_movement_on_loop_{movement}}")
+            self.model.AddElement(self.t_loop_start, movement_arr, waldo_movement_on_loop)
+            self.model.AddElement(self.t_loop_end, movement_arr, waldo_movement_on_loop)
+
 
 
     def make_atom_location_constraints(self, atoms_dict: dict[int, list[tuple[int, int, int]]]):

@@ -27,7 +27,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         self.__solution_count += 1
         print(f"Solution {self.__solution_count}")
         for t in range(self.game.T):
-            print(f"Time {t}")
+            print(f"Time {t}" + (": LOOP START" if t==self.Value(game.t_loop_start) else ": LOOP END" if t==self.Value(game.t_loop_end) else ""))
             # Board state. Each cell is a 4x3 block.
             # Blocks are arranged with bottom left corner at (0, 0)
             # In each block, top left=waldo, top right = command, bottom left=arrow, middle-bottom right=atom type

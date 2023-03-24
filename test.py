@@ -87,7 +87,7 @@ def test_hydrogen_transport():
     print(f"Stats: {solver.ResponseStats()}")
 
     print(f"Hydrogen test passed in {solver.WallTime():.3f} s")
-# est_hydrogen_transport()
+# test_hydrogen_transport()
 
 def test_water_input():
     """
@@ -260,5 +260,32 @@ def test_input_output_neon():
     print("Status:", solver.StatusName(status))
     print(f"Neon transport passed in {solver.WallTime():.3f} s")
 test_input_output_neon()
+
+def test_loop_constraint():
+    """
+    Test that oxygen (O2) can be input and output in a loop.
+    """
+    oxygen_pattern = [
+        [None, None, None, None],
+        [None, (8, "R"), (8, "L"), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    game = SpacechemGame(T=15, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
+    game.check()
+    game.make_empty_board_constraint(0)
+    game.make_input_pattern_constraints(pattern=oxygen_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_output_pattern_constraints(pattern=oxygen_pattern, output_command=Command.OUTPUT_PSI)
+    # Should be doable in a 14-cycle loop
+    game.make_loop_constraint(require_empty_board=True)
+
+    solver = cp_model.CpSolver()
+    # game.minimize_symbols()
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+
+    assert status != cp_model.INFEASIBLE, "Loop constraint test failed"
+    print("Status:", solver.StatusName(status))
+    print(f"Loop constraint passed in {solver.WallTime():.3f} s")
+test_loop_constraint()
 
 print("All tests passed")
