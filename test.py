@@ -207,7 +207,7 @@ def test_water_transport():
     assert status != cp_model.INFEASIBLE, "Transport water test failed"
     print("Status:", solver.StatusName(status))
     print(f"Water transport passed in {solver.WallTime():.3f} s")
-# test_water_transport()
+test_water_transport()
 
 def test_input_3_water():
     """Tests that water can be input 3 times."""
@@ -219,10 +219,11 @@ def test_input_3_water():
         pattern=water_pattern
         , input_command=Command.INPUT_ALPHA
     )
+    game.make_output_pattern_constraints(pattern=None, output_command=Command.OUTPUT_PSI)
     game.model.Add(sum(game.waldos[0].command[t][Command.INPUT_ALPHA] for t in range(T)) == 3)
 
     solver = cp_model.CpSolver()
-    # game.minimize_symbols()
+    game.minimize_symbols()
     status = solver.Solve(game.model, None) # SolutionPrinter(game, game.width, game.height))
     
     assert status != cp_model.INFEASIBLE, "Input 3 water test failed"

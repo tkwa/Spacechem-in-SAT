@@ -3,7 +3,7 @@
 from enum import IntEnum
 import itertools
 from ortools.sat.python import cp_model
-
+from typing import Optional
 
 class Movement(IntEnum):
     R = 0
@@ -99,7 +99,7 @@ class Command(IntEnum):
     # BOND_MINUS = 7
     INPUT_ALPHA = 3
     # INPUT_BETA = 9
-    # OUTPUT_PSI = 4
+    OUTPUT_PSI = 4
     # OUTPUT_OMEGA = 11
     # Still need to implement: flip flops, sense, fuse/split
 
@@ -116,6 +116,8 @@ class Cell():
         # atom_id is undefined if no atom is present; atom_type is 0 if no atom is present.
         self.atom_id = [model.NewIntVar(0, max_atoms-1, f'cell_{x}_{y}_atom_id_{t}') for t in range(T)]
         self.atom_type = [model.NewIntVar(0, n_atom_types, f'cell_{x}_{y}_atom_type_{t}') for t in range(T)]
+        # atom_new is undefined if no atom is present.
+        self.atom_new = [model.NewBoolVar(f'cell_{x}_{y}_atom_new_{t}') for t in range(T)]
         self.waldo_at_cell = [model.NewBoolVar(f'cell_{x}_{y}_waldo_{t}') for t in range(T)]
         self.waldo_grabbing = [model.NewBoolVar(f'cell_{x}_{y}_waldo_grabbing_{t}') for t in range(T)]
         self.command = [model.NewBoolVar(f'cell_{x}_{y}_command_{c}') for c in Command]
@@ -277,12 +279,15 @@ class SpacechemGame():
             if t > 0:
                 for atom in self.atoms:
                     m.Add(atom.active[t] <= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
-                    m.Add(atom.active[t] >= atom.active[t-1]) # .OnlyEnforceIf(self.waldos[0].command[t][Command.OUTPUT_PSI].Not())
+                    m.Add(atom.active[t] >= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.OUTPUT_PSI].Not())
                 self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
+                # Redundant constraint, hopefully this saves time
+                self.model.Add(self.n_active_atoms[t] >= self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA])
             # Whether an atom is active is determined by its ID.
-            for id, atom in enumerate(self.atoms):
-                m.Add(atom.id < self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t])
-                m.Add(atom.id >= self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t].Not())
+            # for id, atom in enumerate(self.atoms):
+            #     m.Add(atom.id < self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t])
+            #     m.Add(atom.id >= self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t].Not())
+            m.Add(sum(atom.active[t] for atom in self.atoms) == self.n_active_atoms[t])
 
             # No two active atoms have the same position
             for i, atom1 in enumerate(self.atoms):
@@ -365,6 +370,9 @@ class SpacechemGame():
                         # All this is needed for the cell.atom_id, cell.atom_type, and cell.occupied variables, plus checking bonds
                         m.Add(cell.atom_id[t] == atom.id).OnlyEnforceIf(atom_at_cell)
                         m.Add(cell.atom_type[t] == atom.type[t]).OnlyEnforceIf(atom_at_cell)
+                        # Stores whether an atom is new.
+                        if t > 0:
+                            m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell)
                         # Check bonds. Bonds can potentially be optimized by a factor of 2.
                         for bond in BondDir:
                             m.AddImplication(atom.bonds[t][bond], cell.bonds[t][bond]).OnlyEnforceIf(atom_at_cell)
@@ -541,17 +549,21 @@ class SpacechemGame():
                     atom_type = SpacechemGame.atom_types_list.index(sym)
                     self.model.Add(self.cells[x][y].atom_type[t] == atom_type)
 
-    def make_input_pattern_constraints(self, pattern:list, input_command: Command.INPUT_ALPHA):
+    def make_input_pattern_constraints(self, pattern:Optional[list]=None, input_command=Command.INPUT_ALPHA):
         """
-        Takes a 4x4 list of atom types, and generates constraints that enforce that pattern.
+        Takes a 4x4 list of atom types, and generates constraints that enforce the input pattern.
         At any time t, input can be activated. If so,
         - n new atoms must be made active at time t
         - for each filled cell in the pattern, the cell must have the corresponding atom type at time t
         - the cells are filled with new atom ids
 
-        Pattern format: a 4x4 list where each element is (atom_type, (bondR, bondU, bondL, bondD)) or None
-        Increasing y is up
+        Pattern format: a 4x4 list where each element is (atom_type, (bondR, bondU, bondL, bondD)) or None. Increasing y is up.
+        If pattern is None, the input command is disabled.
         """
+        if pattern is None:
+            for t in range(1, self.T):
+                self.model.Add(self.waldos[0].command[t][input_command] == 0)
+            return
         pattern = pattern[::-1]
         n_new_atoms = sum(1 for row in pattern for atom_spec in row if atom_spec is not None)
         x_offset = 0
@@ -570,11 +582,34 @@ class SpacechemGame():
                 cell = self.cells[x][y]
                 self.model.Add(cell.occupied[t] == True).OnlyEnforceIf(input_at_t)
                 self.model.Add(cell.atom_type[t] == atom_type).OnlyEnforceIf(input_at_t)
-                self.model.Add(self.n_active_atoms[t-1] <= cell.atom_id[t]).OnlyEnforceIf(input_at_t)
-                self.model.Add(cell.atom_id[t] < self.n_active_atoms[t]).OnlyEnforceIf(input_at_t)
+                # self.model.Add(self.n_active_atoms[t-1] <= cell.atom_id[t]).OnlyEnforceIf(input_at_t)
+                # self.model.Add(cell.atom_id[t] < self.n_active_atoms[t]).OnlyEnforceIf(input_at_t)
+                self.model.Add(cell.atom_new[t] == 1).OnlyEnforceIf(input_at_t)
                 for bond_dir in BondDir:
                     self.model.Add(cell.bonds[t][bond_dir] == bonds[bond_dir]).OnlyEnforceIf(input_at_t)
-        
+
+    def make_output_pattern_constraints(self, pattern:Optional[list]=None, output_command=Command.OUTPUT_PSI):
+        """
+        Takes a 4x4 list of atom types, and generates constraints that enforce the output pattern.
+        At any time t, output can be activated. If so,
+        - n atoms must be made inactive at time t
+        - for each filled cell in the pattern, the cell must have the corresponding atom type at time t
+        - the cells must be filled with atoms to be discontinued
+        """
+        if pattern is None:
+            for t in range(1, self.T):
+                self.model.Add(self.waldos[0].command[t][output_command] == 0)
+            return
+        pattern = pattern[::-1]
+        n_output_atoms = sum(1 for row in pattern for atom_spec in row if atom_spec is not None)
+        x_offset = 0
+        y_offset = 4 if output_command == Command.INPUT_ALPHA else 0
+        atoms_dict = {(x + x_offset, y + y_offset): atom for y, row in enumerate(pattern) for x, atom in enumerate(row) if atom is not None}
+        assert self.max_atoms >= n_output_atoms
+        # TODO finish implementing
+ 
+
+
 
 
     def make_waldo_location_constraints(self, waldo_locations: list[tuple[int, int, int]]):
@@ -596,7 +631,8 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         Command.NONE: ' ',
         Command.GRAB: 'g',
         Command.DROP: 'd',
-        Command.INPUT_ALPHA: 'α'
+        Command.INPUT_ALPHA: 'α',
+        Command.OUTPUT_PSI: 'ψ',
         # Command.BOND_PLUS: '+',
     }
 
@@ -732,7 +768,7 @@ if __name__ == '__main__':
     print(f"Done building model")
     # Solve model
     solver = cp_model.CpSolver()
-    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height))
+    status = solver.Solve(game.model, None) # SolutionPrinter(game, game.width, game.height))
     print("Status:", solver.StatusName(status))
     print(f"Time: {solver.WallTime():.3f} s")
     print(f"Stats: {solver.ResponseStats()}")
