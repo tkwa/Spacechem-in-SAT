@@ -269,12 +269,6 @@ class SpacechemGame():
     def atom(self, id):
         return self.atoms[id]
     
-    def minimize_symbols(self):
-        # Minimizes the non-NONE commands and arrows across all cells
-        commands = [cell.command[Command.NONE].Not() for l in self.cells for cell in l]
-        arrows = [cell.arrow[Movement.STALL].Not() for l in self.cells for cell in l]
-        self.model.Minimize(sum(commands + arrows))
-    
     def check(self):
         m = self.model
         for t in range(self.T):
@@ -534,7 +528,33 @@ class SpacechemGame():
                 if not atom1.active or not atom2.active:
                     continue
                 assert not(atom1.x[t] == atom2.x[t] and atom1.y[t] == atom2.y[t])
+    
+    
+    """Objectives"""
+    def minimize_symbols(self):
+        # Minimizes the non-NONE commands and arrows across all cells
+        commands = [cell.command[Command.NONE].Not() for l in self.cells for cell in l]
+        arrows = [cell.arrow[Movement.STALL].Not() for l in self.cells for cell in l]
+        self.model.Minimize(sum(commands + arrows))
+    
+    def standard_objective(self, require_empty_board=True):
+        """
+        Minimizes cycles + symbols. Includes a loop constraint.
+        Standard objective always overestimates cycles because it counts until the end of the loop,
+        not the last output command that outputs a molecule.
+        """
+        commands = [cell.command[Command.NONE].Not() for l in self.cells for cell in l]
+        arrows = [cell.arrow[Movement.STALL].Not() for l in self.cells for cell in l]
 
+        self.make_loop_constraint(require_empty_board=require_empty_board)
+
+        N_OUTPUTS = 10
+        self.n_cycles = self.model.NewIntVar(0, 1000, "n_cycles")
+        self.model.Add(self.n_cycles == (N_OUTPUTS) * (self.t_loop_end - self.t_loop_start) + self.t_loop_start)
+        self.model.Minimize(self.n_cycles + sum(commands + arrows))
+
+        
+    """Constraints"""
     def make_loop_constraint(self, require_empty_board=True):
         """
         Enforces that there are two times, t1 and t2, such that t1 < t2 and

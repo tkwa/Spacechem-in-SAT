@@ -271,13 +271,14 @@ def test_loop_constraint():
         [None, None, None, None],
         [None, None, None, None],
     ]
-    game = SpacechemGame(T=15, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
+    game = SpacechemGame(T=19, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
     game.check()
     game.make_empty_board_constraint(0)
     game.make_input_pattern_constraints(pattern=oxygen_pattern, input_command=Command.INPUT_ALPHA)
     game.make_output_pattern_constraints(pattern=oxygen_pattern, output_command=Command.OUTPUT_PSI)
+    # game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
     # Should be doable in a 14-cycle loop
-    game.make_loop_constraint(require_empty_board=True)
+    game.standard_objective()
 
     solver = cp_model.CpSolver()
     # game.minimize_symbols()
