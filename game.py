@@ -117,7 +117,10 @@ class Cell():
         self.atom_id = [model.NewIntVar(0, max_atoms-1, f'cell_{x}_{y}_atom_id_{t}') for t in range(T)]
         self.atom_type = [model.NewIntVar(0, n_atom_types, f'cell_{x}_{y}_atom_type_{t}') for t in range(T)]
         # atom_new is undefined if no atom is present.
-        self.atom_new = [model.NewBoolVar(f'cell_{x}_{y}_atom_new_{t}') for t in range(T)]
+        if x < 4:
+            self.atom_new = [model.NewBoolVar(f'cell_{x}_{y}_atom_new_{t}') for t in range(T)]
+        if x >= 6:
+            self.atom_output = [model.NewBoolVar(f'cell_{x}_{y}_atom_output_{t}') for t in range(T)]
         self.waldo_at_cell = [model.NewBoolVar(f'cell_{x}_{y}_waldo_{t}') for t in range(T)]
         self.waldo_grabbing = [model.NewBoolVar(f'cell_{x}_{y}_waldo_grabbing_{t}') for t in range(T)]
         self.command = [model.NewBoolVar(f'cell_{x}_{y}_command_{c}') for c in Command]
@@ -234,7 +237,7 @@ class SpacechemGame():
     """
     Variables are an object's state at time t, BEFORE atoms move to time t+1.
     """
-    atom_types_list = ['?', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne']
+    atom_types_list = ['?', 'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne', 'Na']
 
     def __init__(self, T:int, width:int=10, height:int=8, n_atom_types:int=100, max_atoms:int=80, n_waldos:int=1, max_bfs:int=10):
         """
@@ -279,8 +282,8 @@ class SpacechemGame():
             if t > 0:
                 for atom in self.atoms:
                     m.Add(atom.active[t] <= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
-                    m.Add(atom.active[t] >= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.OUTPUT_PSI].Not())
-                self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
+                    m.Add(atom.active[t] >= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
+                self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not(), self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
                 # Redundant constraint, hopefully this saves time
                 self.model.Add(self.n_active_atoms[t] >= self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA])
             # Whether an atom is active is determined by its ID.
@@ -371,8 +374,12 @@ class SpacechemGame():
                         m.Add(cell.atom_id[t] == atom.id).OnlyEnforceIf(atom_at_cell)
                         m.Add(cell.atom_type[t] == atom.type[t]).OnlyEnforceIf(atom_at_cell)
                         # Stores whether an atom is new.
-                        if t > 0:
-                            m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA])
+                        if t > 0 and cell.x < 4: # we only need to deal with new atoms in input zones
+                                m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA])
+                        if t < self.T - 1 and cell.x > 6:
+                                # atom_output can be undefined if cells are output on the last cycle. This seems ok...
+                                m.Add(cell.atom_output[t] == atom.active[t+1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.OUTPUT_PSI])
+                                m.AddImplication(cell.atom_output[t], atom.grabbed[t].Not())
                             # m.Add(cell.atom_new[t] == 0).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
                         # Check bonds. Bonds can potentially be optimized by a factor of 2.
                         for bond in BondDir:
@@ -589,13 +596,14 @@ class SpacechemGame():
                 for bond_dir in BondDir:
                     self.model.Add(cell.bonds[t][bond_dir] == bonds[bond_dir]).OnlyEnforceIf(input_at_t)
 
-    def make_output_pattern_constraints(self, pattern:Optional[list]=None, output_command=Command.OUTPUT_PSI):
+    def make_output_pattern_constraints(self, pattern:Optional[list]=None, output_command=Command.OUTPUT_PSI, enforcement='lenient'):
         """
         Takes a 4x4 list of atom types, and generates constraints that enforce the output pattern.
         At any time t, output can be activated. If so,
         - n atoms must be made inactive at time t
         - for each filled cell in the pattern, the cell must have the corresponding atom type at time t
-        - the cells must be filled with atoms to be discontinued
+        - the cells must be filled with atoms to be discontinued.
+        Even though in the game, the cell visually disappears at time t, it is active on cycle t and inactive on cycle t+1.
         """
         if pattern is None:
             for t in range(1, self.T):
@@ -603,11 +611,31 @@ class SpacechemGame():
             return
         pattern = pattern[::-1]
         n_output_atoms = sum(1 for row in pattern for atom_spec in row if atom_spec is not None)
-        x_offset = 0
-        y_offset = 4 if output_command == Command.INPUT_ALPHA else 0
+        x_offset = 6
+        y_offset = 4 if output_command == Command.OUTPUT_PSI else 0
         atoms_dict = {(x + x_offset, y + y_offset): atom for y, row in enumerate(pattern) for x, atom in enumerate(row) if atom is not None}
         assert self.max_atoms >= n_output_atoms
-        # TODO finish implementing
+        # SpaceChem sometimes will output the wrong molecule, and we haven't implemented this yet.
+        if enforcement != 'lenient': raise NotImplementedError()
+
+        for t in range(1, self.T):
+            output_at_t:cp_model.IntVar = self.waldos[0].command[t][output_command]
+
+            if t < self.T - 1:
+                self.model.Add(self.n_active_atoms[t + 1] == self.n_active_atoms[t] - n_output_atoms).OnlyEnforceIf(output_at_t)
+
+            for x, y in atoms_dict:
+                atom_type, bond_string = atoms_dict[(x,y)]
+                bonds = [bond_chr in bond_string for bond_chr in "RULD"]
+                cell = self.cells[x][y]
+                self.model.Add(cell.occupied[t] == True).OnlyEnforceIf(output_at_t)
+                self.model.Add(cell.atom_type[t] == atom_type).OnlyEnforceIf(output_at_t)
+                self.model.Add(cell.atom_output[t] == 1).OnlyEnforceIf(output_at_t)
+                for bond_dir in BondDir:
+                    self.model.Add(cell.bonds[t][bond_dir] == bonds[bond_dir]).OnlyEnforceIf(output_at_t)
+
+                # do we need to check that atoms are not grabbed?
+
  
 
 

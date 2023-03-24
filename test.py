@@ -202,7 +202,7 @@ def test_water_transport():
 
     solver = cp_model.CpSolver()
     game.minimize_symbols()
-    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height))
+    status = solver.Solve(game.model, None) # SolutionPrinter(game, game.width, game.height))
     
     assert status != cp_model.INFEASIBLE, "Transport water test failed"
     print("Status:", solver.StatusName(status))
@@ -223,13 +223,41 @@ def test_input_3_water():
     game.model.Add(sum(game.waldos[0].command[t][Command.INPUT_ALPHA] for t in range(T)) == 3)
 
     solver = cp_model.CpSolver()
-    game.minimize_symbols()
-    status = solver.Solve(game.model, None) # SolutionPrinter(game, game.width, game.height))
+    # game.minimize_symbols()
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height))
     
     assert status != cp_model.INFEASIBLE, "Input 3 water test failed"
     print(f"Status: {solver.StatusName(status)}; {solver.ObjectiveValue()}")
     print(f"Input 3 water passed in {solver.WallTime():.3f} s")
 test_input_3_water()
 
+def test_input_output_neon():
+    """
+    Test that neon can be input, then moved from input alpha to output omega.
+    """
+    T=10
+    game = SpacechemGame(T=T, width=10, height=8, n_atom_types=10, max_atoms=2, n_waldos=1, max_bfs=2)
+    game.check()
+    game.make_empty_board_constraint(0)
+    game.make_atom_location_constraints({0: [(8, 6, 8)]})
+    neon_pattern = [
+        [None, None, None, None],
+        [None, None, (10, ""), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    game.make_input_pattern_constraints(pattern=neon_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_output_pattern_constraints(pattern=neon_pattern, output_command=Command.OUTPUT_PSI)
+    game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
+    game.model.Add(game.waldos[0].command[9][Command.OUTPUT_PSI] == 1)
+
+    solver = cp_model.CpSolver()
+    game.minimize_symbols()
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+    
+    assert status != cp_model.INFEASIBLE, "Transport neon test failed"
+    print("Status:", solver.StatusName(status))
+    print(f"Neon transport passed in {solver.WallTime():.3f} s")
+test_input_output_neon()
 
 print("All tests passed")
