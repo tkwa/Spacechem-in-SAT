@@ -15,7 +15,6 @@ Don't, it's not functional yet. If you insist, look at the tests in `test.py` an
 
 - Bond+ and Bond- commands.
 - Some way to import puzzles and export solutions.
-- Loop checking (for finding the lowest cycle solution).
 - Input beta and output omega zones.
 - Rotation.
 - Multiple bonds and bond limits.
