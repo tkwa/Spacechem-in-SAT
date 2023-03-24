@@ -1,4 +1,5 @@
 from game import *
+from solution_printer import SolutionPrinter
 
 def test_nothing():
     game = SpacechemGame(T=11, width=10, height=8, n_atom_types=2, max_atoms=2, n_waldos=1, max_bfs=5)
