@@ -372,7 +372,8 @@ class SpacechemGame():
                         m.Add(cell.atom_type[t] == atom.type[t]).OnlyEnforceIf(atom_at_cell)
                         # Stores whether an atom is new.
                         if t > 0:
-                            m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell)
+                            m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA])
+                            # m.Add(cell.atom_new[t] == 0).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
                         # Check bonds. Bonds can potentially be optimized by a factor of 2.
                         for bond in BondDir:
                             m.AddImplication(atom.bonds[t][bond], cell.bonds[t][bond]).OnlyEnforceIf(atom_at_cell)
@@ -636,13 +637,14 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         # Command.BOND_PLUS: '+',
     }
 
-    def __init__(self, game: SpacechemGame, width, height):
+    def __init__(self, game: SpacechemGame, width, height, print_level='verbose'):
         cp_model.CpSolverSolutionCallback.__init__(self)
         self.model = game.model
         self.__solution_count = 0
         self.game = game
         self.width = width
         self.height = height
+        self.print_level = print_level
 
     def on_solution_callback(self):
         game = self.game
@@ -687,6 +689,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
             print('└' + '─' * (self.width * 4 - 1) + '┘')
 
             # Descriptions of all atoms
+            if self.print_level != 'verbose': continue
             for atom in self.game.atoms:
                 atom_active = self.Value(atom.active[t])
                 if not atom_active:
