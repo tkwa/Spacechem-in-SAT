@@ -3,7 +3,7 @@ A solver for SpaceChem research puzzles using ORTools.
 
 ## How to use
 
-Don't, it's not functional yet. If you insist, look at the tests in `test.py` and write your own puzzle spec.
+Importing puzzles is not supported yet. Run `it-takes-three.py` to generate a solution to an easy puzzle; it should take about 100 seconds.
 
 ## Features
 
