@@ -10,7 +10,8 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         Command.DROP: 'd',
         Command.INPUT_ALPHA: 'α',
         Command.OUTPUT_PSI: 'ψ',
-        # Command.BOND_PLUS: '+',
+        Command.BOND_PLUS: '⊕',
+        Command.BOND_MINUS: '⊖',
     }
 
     def __init__(self, game: SpacechemGame, width, height, print_level='verbose'):
@@ -105,6 +106,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
             #     for cell in l:
             #         print(f"Cell {cell.x, cell.y} cell bonds: {''.join(('>^<v'[bond] if self.Value(cell.bonds[t][bond]) else  '') for bond in BondDir)}")
             print()
+        print(f"Solution count: {self.solution_count()}")
 
     def solution_count(self):
         return self.__solution_count

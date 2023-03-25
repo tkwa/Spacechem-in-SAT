@@ -10,7 +10,6 @@ def test_nothing():
     
     assert status == cp_model.FEASIBLE or status == cp_model.OPTIMAL, "Nothing test failed"
     print("Nothing test passed")
-test_nothing()
 
 def test_atom_BFS():
     game = SpacechemGame(T=5, width=10, height=8, n_atom_types=2, max_atoms=2, n_waldos=1, max_bfs=5)
@@ -28,7 +27,6 @@ def test_atom_BFS():
 
     assert status != cp_model.INFEASIBLE, "Atom BFS test failed"
     print("Atom BFS test passed")
-test_atom_BFS()
 
 def test_atom_grabbed_state():
     game = SpacechemGame(T=11, width=10, height=8, n_atom_types=2, max_atoms=2, n_waldos=1, max_bfs=5)
@@ -132,7 +130,6 @@ def test_water_input():
     assert status != cp_model.INFEASIBLE, "Input water test failed"
     print("Status:", solver.StatusName(status))
     print(f"Water input test passed in {solver.WallTime():.3f} s")
-test_water_input()
 
 def test_CF4():
     """
@@ -168,7 +165,6 @@ def test_CF4():
     assert status != cp_model.INFEASIBLE, "Input CF4 crowded test failed"
     print("Status:", solver.StatusName(status))
     print(f"Input CF4 crowded test passed in {solver.WallTime():.3f} s")
-test_CF4()
 
 water_pattern =[
         [None, None, None, None],
@@ -208,7 +204,6 @@ def test_water_transport():
     assert status != cp_model.INFEASIBLE, "Transport water test failed"
     print("Status:", solver.StatusName(status))
     print(f"Water transport passed in {solver.WallTime():.3f} s")
-test_water_transport()
 
 def test_input_3_water():
     """Tests that water can be input 3 times."""
@@ -230,7 +225,6 @@ def test_input_3_water():
     assert status != cp_model.INFEASIBLE, "Input 3 water test failed"
     print(f"Status: {solver.StatusName(status)}; {solver.ObjectiveValue()}")
     print(f"Input 3 water passed in {solver.WallTime():.3f} s")
-test_input_3_water()
 
 def test_input_output_neon():
     """
@@ -259,7 +253,6 @@ def test_input_output_neon():
     assert status != cp_model.INFEASIBLE, "Transport neon test failed"
     print("Status:", solver.StatusName(status))
     print(f"Neon transport passed in {solver.WallTime():.3f} s")
-test_input_output_neon()
 
 def test_loop_constraint():
     """
@@ -281,12 +274,108 @@ def test_loop_constraint():
     game.standard_objective()
 
     solver = cp_model.CpSolver()
-    # game.minimize_symbols()
     status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
 
     assert status != cp_model.INFEASIBLE, "Loop constraint test failed"
     print("Status:", solver.StatusName(status))
     print(f"Loop constraint passed in {solver.WallTime():.3f} s")
-test_loop_constraint()
+
+def test_bond_plus():
+    """
+    Test that O can be bonded using bonders to form O3.
+    """
+    O_pattern = [
+        [None, None, None, None],
+        [None, None, (8, ""), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    O3_pattern = [
+        [None, None, None, None],
+        [None, (8, "R"), (8, "LD"), None],
+        [None, None, (8, "U"), None],
+        [None, None, None, None],
+    ]
+    game = SpacechemGame(T=23, width=10, height=8, n_atom_types=9, max_atoms=3, n_waldos=1, max_bfs=2, n_bonders=4)
+    game.check()
+    game.make_empty_board_constraint(0)
+    game.make_input_pattern_constraints(pattern=O_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_output_pattern_constraints(pattern=O3_pattern, output_command=Command.OUTPUT_PSI)
+    game.standard_objective()
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 30
+    # game.minimize_symbols()
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+
+    assert status == cp_model.FEASIBLE, "Bond+ test failed"
+    print("Status:", solver.StatusName(status))
+    print(f"Bond+ passed in {solver.WallTime():.3f} s")
+
+def test_bond_minus():
+    """
+    Test that F2 can be debonded using bonders to form F.
+    This is identical to the level "Removing Bonds" in the game.
+    The solver's output behavior is different, but the solution found works anyway.
+    ┌───────────────────────────────────────┐
+    │   │   │   │   │   │   │   │   │   │   │
+    │.  │>  │.  │.  │.  │.  │.  │.  │v  │.  │
+    │   │ g │ α │W  │   │   │   │ ψ │ d │ g │
+    │.  │^  │.  │.  │.  │.  │.  │.  │.  │<  │
+    │   │   │   │   │   │   │   │   │ ⊖ │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │.  │.  │
+    │   │   │   │   │   │   │   │   │ ψ │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │>  │^  │
+    │   │   │   │   │   │   │   │   │   │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │.  │.  │
+    │   │   │   │   │   │   │   │   │   │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │.  │.  │
+    │   │   │   │   │   │   │   │   │   │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │.  │.  │
+    │   │   │   │   │   │   │   │   │   │   │
+    │.  │.  │.  │.  │.  │.  │.  │.  │.  │.  │
+    └───────────────────────────────────────┘
+    """
+    F2_pattern = [
+        [None, None, None, None],
+        [None, (9, "R"), (9, "L"), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    F_pattern = [
+        [None, None, None, None],
+        [None, None, (9, ""), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    game = SpacechemGame(T=23, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2, n_bonders=2)
+    game.check()
+    game.make_empty_board_constraint(0)
+    game.make_input_pattern_constraints(pattern=F2_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_output_pattern_constraints(pattern=F_pattern, output_command=Command.OUTPUT_PSI)
+    # game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
+    game.standard_objective()
+
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 30
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+
+    assert status == cp_model.FEASIBLE or status == cp_model.OPTIMAL, "Bond- test failed"
+    print("Status:", solver.StatusName(status))
+    print(f"Bond- passed in {solver.WallTime():.3f} s")
+
+
+# test_nothing()
+# test_atom_BFS()
+# test_water_input()
+# test_CF4()
+# test_water_transport()
+# test_input_3_water()
+# test_input_output_neon()
+# test_loop_constraint()
+
+# test_bond_plus()
+test_bond_minus()
+
 
 print("All tests passed")

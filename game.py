@@ -27,11 +27,11 @@ class Command(IntEnum):
     # GRABDROP = 3
     # ROTATE_CCW = 4
     # ROTATE_CW = 5
-    # BOND_PLUS = 6
-    # BOND_MINUS = 7
-    INPUT_ALPHA = 3
+    BOND_PLUS = 3
+    BOND_MINUS = 4
+    INPUT_ALPHA = 5
     # INPUT_BETA = 9
-    OUTPUT_PSI = 4
+    OUTPUT_PSI = 6
     # OUTPUT_OMEGA = 11
     # Still need to implement: flip flops, sense, fuse/split
 
@@ -60,6 +60,7 @@ class Atom():
         self.movement = [[model.NewBoolVar(f'atom_{id}_move_{movement}_{t}') for movement in Movement] for t in rT]
         # self.molecule_id = [None]*T
         self.bonds = [[model.NewBoolVar(f'atom_{id}_bond_{bond_dir}_{t}') for bond_dir in BondDir] for t in rT]
+        self.bonder_directions = [[model.NewBoolVar(f'atom_{id}_bonder_{bond_dir}_{t}') for bond_dir in BondDir] for t in rT]
         # This will be extended to whether the atom is grabbed by each waldo
         self.grabbed = [model.NewBoolVar(f'atom_{id}_grab_{t}') for t in rT]
         # Distance from the waldo, if grabbed. Otherwise -1.
@@ -94,10 +95,6 @@ class Atom():
             # Active atoms cannot change type.
             model.Add(self.type[t+1] == self.type[t]).OnlyEnforceIf(self.active[t])
 
-            # Atom bonds are preserved (except bond command which come later). This is cheaper than checking cells.
-            for bond_dir in BondDir:
-                model.Add(self.bonds[t+1][bond_dir] == self.bonds[t][bond_dir]).OnlyEnforceIf(self.active[t])
-
         model.Add(self.BFS_depth[t] == -1).OnlyEnforceIf(self.molecule_grabbed[t].Not())
         model.Add(self.BFS_depth[t] >= 0).OnlyEnforceIf(self.molecule_grabbed[t]) # this is the problem...
 
@@ -126,6 +123,7 @@ class Cell():
         self.command = [model.NewBoolVar(f'cell_{x}_{y}_command_{c}') for c in Command]
         self.arrow = [model.NewBoolVar(f'cell_{x}_{y}_arrow_{v}') for v in Movement]
         self.bonds = [[model.NewBoolVar(f'cell_{x}_{y}_bond_{bond_dir}_{t}') for bond_dir in BondDir] for t in range(T)]
+        self.bonder_directions = [model.NewBoolVar(f'cell_{x}_{y}_bonder_direction_{bond_dir}') for bond_dir in BondDir]
         self.BFS_depth = [model.NewIntVar(-1, max_bfs, f'cell_{x}_{y}_bfs_depth_{t}') for t in range(T)]
         self.BFS_depth_ge_1 = [model.NewBoolVar(f'cell_{x}_{y}_indirectly grabbed_{t}') for t in range(T)]
         self.BFS_parent_dirs = [[model.NewBoolVar(f'cell_{x}_{y}_parent_direction_{bond_dir}_{t}') for bond_dir in BondDir] for t in range(T)]
@@ -239,7 +237,7 @@ class SpacechemGame():
     """
     atom_types_list = \
     '? H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt'.split()
-    def __init__(self, T:int, width:int=10, height:int=8, n_atom_types:int=109, max_atoms:int=80, n_waldos:int=1, max_bfs:int=10):
+    def __init__(self, T:int, width:int=10, height:int=8, n_atom_types:int=109, max_atoms:int=80, n_waldos:int=1, max_bfs:int=10, n_bonders=0):
         """
         max_bfs is the maximum distance from an atom to a grabbing waldo.
         """
@@ -249,12 +247,13 @@ class SpacechemGame():
         self.height = height
         self.n_atom_types = n_atom_types
         self.max_atoms = max_atoms
+        self.n_bonders = n_bonders
         self.atoms = [Atom(self.model, T, id, height, width, n_atom_types=n_atom_types, max_bfs=max_bfs) for id in range(max_atoms)]
         # Number of active atoms. Atoms become active on the cycle they are input, and inactive on the cycle they are output.
         self.n_active_atoms = [self.model.NewIntVar(0, max_atoms, f'n_active_atoms_{t}') for t in range(T)]
         self.cells:list[list[Cell]] = [[Cell(self.model, T, height, width, x, y, n_atom_types, max_atoms, max_bfs) for y in range(height)] for x in range(width)]
         self.waldos = [Waldo(self.model, T, id, height, width, max_atoms) for id in range(n_waldos)]
-        # self.bonders = [[None for _ in range(height)] for _ in range(width)]
+        self.bonders = [[self.model.NewBoolVar(f'bonder_{x}_{y}') for y in range(height)] for x in range(width)]
 
         # Used for loop constraint
         self.t_loop_start = self.model.NewIntVar(0, self.T - 1, "t_loop_start")
@@ -263,6 +262,8 @@ class SpacechemGame():
         self.t_output = self.model.NewIntVar(0, self.T - 1, "t_output")
         self.waldo_x_on_loop = self.model.NewIntVar(0, width - 1, "waldo_x_on_loop")
         self.waldo_y_on_loop = self.model.NewIntVar(0, height - 1, "waldo_y_on_loop")
+
+        # Bonders
     
         assert n_waldos == 1, "Only one waldo is supported for now"
 
@@ -271,6 +272,37 @@ class SpacechemGame():
     
     def check(self):
         m = self.model
+
+        m.Add(sum(self.bonders[x][y] for x in range(self.width) for y in range(self.height)) == self.n_bonders)
+
+        for x in range(self.width):
+            for y in range(self.height):
+                cell = self.cells[x][y]
+                if x > 0:
+                    m.Add(cell.bonder_directions[Movement.L] == 1).OnlyEnforceIf(self.bonders[x-1][y], self.bonders[x][y])
+                    m.Add(cell.bonder_directions[Movement.L] == 0).OnlyEnforceIf(self.bonders[x-1][y].Not())
+                    m.Add(cell.bonder_directions[Movement.L] == 0).OnlyEnforceIf(self.bonders[x][y].Not())
+                else:
+                    m.Add(cell.bonder_directions[Movement.L] == 0)
+                if x < self.width - 1:
+                    m.Add(cell.bonder_directions[Movement.R] == 1).OnlyEnforceIf(self.bonders[x+1][y], self.bonders[x][y])
+                    m.Add(cell.bonder_directions[Movement.R] == 0).OnlyEnforceIf(self.bonders[x+1][y].Not())
+                    m.Add(cell.bonder_directions[Movement.R] == 0).OnlyEnforceIf(self.bonders[x][y].Not())
+                else:
+                    m.Add(cell.bonder_directions[Movement.R] == 0)
+                if y > 0:
+                    m.Add(cell.bonder_directions[Movement.D] == 1).OnlyEnforceIf(self.bonders[x][y-1], self.bonders[x][y])
+                    m.Add(cell.bonder_directions[Movement.D] == 0).OnlyEnforceIf(self.bonders[x][y-1].Not())
+                    m.Add(cell.bonder_directions[Movement.D] == 0).OnlyEnforceIf(self.bonders[x][y].Not())
+                else:
+                    m.Add(cell.bonder_directions[Movement.D] == 0)
+                if y < self.height - 1:
+                    m.Add(cell.bonder_directions[Movement.U] == 1).OnlyEnforceIf(self.bonders[x][y+1], self.bonders[x][y])
+                    m.Add(cell.bonder_directions[Movement.U] == 0).OnlyEnforceIf(self.bonders[x][y+1].Not())
+                    m.Add(cell.bonder_directions[Movement.U] == 0).OnlyEnforceIf(self.bonders[x][y].Not())
+                else:
+                    m.Add(cell.bonder_directions[Movement.U] == 0)
+
         for t in range(self.T):
             # Check atoms, cells, and waldos
             for atom in self.atoms:
@@ -288,10 +320,6 @@ class SpacechemGame():
                 self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not(), self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
                 # Redundant constraint, hopefully this saves time
                 self.model.Add(self.n_active_atoms[t] >= self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA])
-            # Whether an atom is active is determined by its ID.
-            # for id, atom in enumerate(self.atoms):
-            #     m.Add(atom.id < self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t])
-            #     m.Add(atom.id >= self.n_active_atoms[t]).OnlyEnforceIf(atom.active[t].Not())
             m.Add(sum(atom.active[t] for atom in self.atoms) == self.n_active_atoms[t])
 
             # No two active atoms have the same position
@@ -319,21 +347,21 @@ class SpacechemGame():
                         m.AddImplication(atom.grabbed[t], waldo_grabbing_atom)
                         m.AddImplication(waldo_grabbing_atom, atom.grabbed[t])
 
-            # AddElement method: 5.3 seconds
-            # for id, atom in enumerate(self.atoms):
-            #     assert atom.id == id
-            #     # remember, atom xy is only constrained if atom is active
-            #     m.AddElement(atom.xy[t], [cell.atom_id[t] for cell in self.cells_flat], atom.id)
-            #     m.AddElement(atom.xy[t], [cell.atom_type[t] for cell in self.cells_flat], atom.type[t])
-            #     m.AddElement(atom.xy[t], [cell.occupied[t] for cell in self.cells_flat], 1)
-            # for l in self.cells:
-            #     for cell in l:
-            #         # If a cell is unoccupied, its atom id can be assigned to the dummy atom
-            #         # what's keeping two atoms from being in the same cell? this must be a separate constraint
-            #         dummy_x = m.NewIntVar(cell.x, cell.x, f'dummy_x_{cell.x}_{cell.y}')
-            #         dummy_y = m.NewIntVar(cell.y, cell.y, f'dummy_y_{cell.x}_{cell.y}')
-            #         m.AddElement(cell.atom_id[t], [atom.x[t] for atom in self.atoms] + [dummy_x], cell.x)
-            #         m.AddElement(cell.atom_id[t], [atom.y[t] for atom in self.atoms] + [dummy_y], cell.y)
+
+                        # Atom bonds at time t are affected by bond commands at time t-- bonded atoms should attach to waldo molecule
+                        # and start moving immediately.
+                        if t > 0:
+                            for bond_dir in BondDir:
+                                m.Add(atom.bonds[t][bond_dir] == atom.bonds[t-1][bond_dir]).OnlyEnforceIf(
+                                    atom.active[t], waldo.command[t][Command.BOND_MINUS].Not(), waldo.command[t][Command.BOND_PLUS].Not())
+                                m.Add(atom.bonds[t][bond_dir] == atom.bonds[t-1][bond_dir]).OnlyEnforceIf(
+                                    atom.active[t], atom.bonder_directions[t][bond_dir].Not())
+                                m.Add(atom.bonds[t][bond_dir] == 1).OnlyEnforceIf(
+                                    atom.active[t], waldo.command[t][Command.BOND_PLUS], atom.bonder_directions[t][bond_dir])
+                                m.Add(atom.bonds[t][bond_dir] == 0).OnlyEnforceIf(
+                                    atom.active[t], waldo.command[t][Command.BOND_MINUS], atom.bonder_directions[t][bond_dir])
+
+
             # Check bonds between cells
             for x in range(self.width):
                 for y in range(self.height):
@@ -387,6 +415,9 @@ class SpacechemGame():
                         for bond in BondDir:
                             m.AddImplication(atom.bonds[t][bond], cell.bonds[t][bond]).OnlyEnforceIf(atom_at_cell)
                             m.AddImplication(cell.bonds[t][bond], atom.bonds[t][bond]).OnlyEnforceIf(atom_at_cell)
+                        # Check that bonders match
+                        for bond in BondDir:
+                            m.Add(cell.bonder_directions[bond] == atom.bonder_directions[t][bond]).OnlyEnforceIf(atom_at_cell)
                         # If there is no atom at the cell, BFS depth is undefined
                         m.Add(cell.BFS_depth[t] == atom.BFS_depth[t]).OnlyEnforceIf(atom_at_cell)
 
@@ -529,7 +560,7 @@ class SpacechemGame():
                     continue
                 assert not(atom1.x[t] == atom2.x[t] and atom1.y[t] == atom2.y[t])
     
-    
+
     """Objectives"""
     def minimize_symbols(self):
         # Minimizes the non-NONE commands and arrows across all cells
