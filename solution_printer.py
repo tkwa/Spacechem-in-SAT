@@ -102,12 +102,13 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
                 arrow = [self.Value(waldo.arrow[t][m]) for m in Movement].index(1)
                 print(f', arrow {">^<v."[arrow]}')
             n_cells_occupied = sum([self.Value(cell.occupied[t]) for l in self.game.cells for cell in l])
-            print(f"{n_cells_occupied} cells occupied")
+            print(f"{n_cells_occupied} cells occupied by {self.Value(self.game.n_active_atoms[t])} atoms")
             # for l in self.game.cells:
             #     for cell in l:
             #         print(f"Cell {cell.x, cell.y} cell bonds: {''.join(('>^<v'[bond] if self.Value(cell.bonds[t][bond]) else  '') for bond in BondDir)}")
             print()
         print(f"Solution count: {self.solution_count()}")
+        print(f"Time: {cp_model.CpSolverSolutionCallback.WallTime(self)}")
 
     def solution_count(self):
         return self.__solution_count

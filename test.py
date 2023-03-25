@@ -260,25 +260,70 @@ def test_loop_constraint():
     """
     oxygen_pattern = [
         [None, None, None, None],
-        [None, (8, "R"), (8, "L"), None],
+        [None,(8, "R"), (8, "L"), None],
         [None, None, None, None],
         [None, None, None, None],
     ]
-    game = SpacechemGame(T=19, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
+    game = SpacechemGame(T=18, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
     game.check()
+    waldo = game.waldos[0]
     game.make_empty_board_constraint(0)
     game.make_input_pattern_constraints(pattern=oxygen_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_input_pattern_constraints(pattern=None, input_command=Command.INPUT_BETA)
     game.make_output_pattern_constraints(pattern=oxygen_pattern, output_command=Command.OUTPUT_PSI)
-    # game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
+    game.model.Add(waldo.x[0] == 3)
+    game.model.Add(waldo.y[0] == 6)
+    game.model.Add(waldo.movement[0][Movement.L] == 1)
+    game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
+    game.model.AddBoolOr(game.waldos[0].command[3][Command.GRAB], game.waldos[0].command[2][Command.GRAB])
+    # game.model.Add(waldo.command[10][Command.DROP] == 1)
+    game.model.Add(sum(game.waldos[0].command[t][Command.OUTPUT_PSI] for t in range(15)) >= 1)
+    # game.model.Add(waldo.movement[11][Movement.L] == 1)
+    # game.model.Add(waldo.x[14] <= 4)
+    # game.model.Add(waldo.y[14] == 6)
+
+    game.model.Add(game.t_loop_start == 0)
+    game.model.Add(game.t_loop_end == 14)
     # Should be doable in a 14-cycle loop
-    game.standard_objective()
+    game.make_loop_constraint()
+    game.minimize_symbols()
 
     solver = cp_model.CpSolver()
-    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='verbose'))
 
     assert status != cp_model.INFEASIBLE, "Loop constraint test failed"
     print("Status:", solver.StatusName(status))
     print(f"Loop constraint passed in {solver.WallTime():.3f} s")
+
+def test_loop_constraint_2():
+    """
+    Test that oxygen (O2) can be input and output in a loop, using standard objective function
+    """
+    oxygen_pattern = [
+        [None, None, None, None],
+        [None,(8, "R"), (8, "L"), None],
+        [None, None, None, None],
+        [None, None, None, None],
+    ]
+    game = SpacechemGame(T=18, width=10, height=8, n_atom_types=9, max_atoms=2, n_waldos=1, max_bfs=2)
+    game.check()
+    game.make_empty_board_constraint(0)
+    game.make_input_pattern_constraints(pattern=oxygen_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_input_pattern_constraints(pattern=None, input_command=Command.INPUT_BETA)
+    game.make_output_pattern_constraints(pattern=oxygen_pattern, output_command=Command.OUTPUT_PSI)
+    game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
+    game.model.AddBoolOr(game.waldos[0].command[3][Command.GRAB], game.waldos[0].command[2][Command.GRAB])
+    # game.model.Add(game.t_loop_start > 0)
+    # game.model.Add(game.t_loop_end < 18)
+    # Should be doable in a 14-cycle loop
+    game.standard_objective()
+
+    solver = cp_model.CpSolver()
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='verbose'))
+
+    assert status != cp_model.INFEASIBLE, "Loop constraint 2 test failed"
+    print("Status:", solver.StatusName(status))
+    print(f"Loop constraint 2 passed in {solver.WallTime():.3f} s")
 
 def test_bond_plus():
     """
@@ -300,15 +345,16 @@ def test_bond_plus():
     game.check()
     game.make_empty_board_constraint(0)
     game.make_input_pattern_constraints(pattern=O_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_input_pattern_constraints(pattern=None, input_command=Command.INPUT_BETA)
     game.make_output_pattern_constraints(pattern=O3_pattern, output_command=Command.OUTPUT_PSI)
     game.standard_objective()
 
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 30
     # game.minimize_symbols()
-    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='boards'))
+    status = solver.Solve(game.model, SolutionPrinter(game, game.width, game.height, print_level='verbose'))
 
-    assert status == cp_model.FEASIBLE, "Bond+ test failed"
+    assert status in [cp_model.FEASIBLE, cp_model.OPTIMAL], "Bond+ test failed"
     print("Status:", solver.StatusName(status))
     print(f"Bond+ passed in {solver.WallTime():.3f} s")
 
@@ -352,6 +398,7 @@ def test_bond_minus():
     game.check()
     game.make_empty_board_constraint(0)
     game.make_input_pattern_constraints(pattern=F2_pattern, input_command=Command.INPUT_ALPHA)
+    game.make_input_pattern_constraints(pattern=None, input_command=Command.INPUT_BETA)
     game.make_output_pattern_constraints(pattern=F_pattern, output_command=Command.OUTPUT_PSI)
     # game.model.Add(game.waldos[0].command[1][Command.INPUT_ALPHA] == 1)
     game.standard_objective()

@@ -83,14 +83,14 @@ class Atom():
         # Atom movement.
         model.AddExactlyOne(self.movement[t])
         if t < self.T-1:
-            model.Add(self.x[t+1] == self.x[t] + 1).OnlyEnforceIf(self.movement[t][Movement.R])
-            model.Add(self.x[t+1] == self.x[t] - 1).OnlyEnforceIf(self.movement[t][Movement.L])
-            model.Add(self.y[t+1] == self.y[t] + 1).OnlyEnforceIf(self.movement[t][Movement.U])
-            model.Add(self.y[t+1] == self.y[t] - 1).OnlyEnforceIf(self.movement[t][Movement.D])
+            model.Add(self.x[t+1] == self.x[t] + 1).OnlyEnforceIf(self.movement[t][Movement.R], self.active[t])
+            model.Add(self.x[t+1] == self.x[t] - 1).OnlyEnforceIf(self.movement[t][Movement.L], self.active[t])
+            model.Add(self.y[t+1] == self.y[t] + 1).OnlyEnforceIf(self.movement[t][Movement.U], self.active[t])
+            model.Add(self.y[t+1] == self.y[t] - 1).OnlyEnforceIf(self.movement[t][Movement.D], self.active[t])
             for movement in Movement.R, Movement.L, Movement.STALL:
-                model.Add(self.y[t+1] == self.y[t]).OnlyEnforceIf(self.movement[t][movement])
+                model.Add(self.y[t+1] == self.y[t]).OnlyEnforceIf(self.movement[t][movement], self.active[t])
             for movement in Movement.U, Movement.D, Movement.STALL:
-                model.Add(self.x[t+1] == self.x[t]).OnlyEnforceIf(self.movement[t][movement])
+                model.Add(self.x[t+1] == self.x[t]).OnlyEnforceIf(self.movement[t][movement], self.active[t])
 
             # Active atoms cannot change type.
             model.Add(self.type[t+1] == self.type[t]).OnlyEnforceIf(self.active[t])
@@ -359,8 +359,8 @@ class SpacechemGame():
                                     atom.active[t], waldo.command[t][Command.BOND_MINUS].Not(), waldo.command[t][Command.BOND_PLUS].Not())
                                 m.Add(atom.bonds[t][bond_dir] == atom.bonds[t-1][bond_dir]).OnlyEnforceIf(
                                     atom.active[t], atom.bonder_directions[t][bond_dir].Not())
-                                m.Add(atom.bonds[t][bond_dir] == 1).OnlyEnforceIf(
-                                    atom.active[t], waldo.command[t][Command.BOND_PLUS], atom.bonder_directions[t][bond_dir])
+                                # m.Add(atom.bonds[t][bond_dir] == 1).OnlyEnforceIf(
+                                #     atom.active[t], waldo.command[t][Command.BOND_PLUS], atom.bonder_directions[t][bond_dir])
                                 m.Add(atom.bonds[t][bond_dir] == 0).OnlyEnforceIf(
                                     atom.active[t], waldo.command[t][Command.BOND_MINUS], atom.bonder_directions[t][bond_dir])
 
@@ -590,6 +590,15 @@ class SpacechemGame():
 
         
     """Constraints"""
+    def bond_locations_constraint(self, n_bond_locations):
+        """
+        Enforces that there are at least n adjacent cell pairs with bonders on each.
+        """
+        self.model.Add(sum([cell.bonder_directions[bond_dir] for l in self.cells for cell in l for bond_dir in BondDir]) \
+                       >= n_bond_locations * 2)
+        
+
+
     def make_loop_constraint(self, require_empty_board=True):
         """
         Enforces that there are two times, t1 and t2, such that t1 < t2 and
@@ -731,7 +740,12 @@ class SpacechemGame():
                 for bond_dir in BondDir:
                     self.model.Add(cell.bonds[t][bond_dir] == bonds[bond_dir]).OnlyEnforceIf(output_at_t)
 
-                # do we need to check that atoms are not grabbed?
+
+    def make_io_constraints(self, alpha=None, beta=None, psi=None, omega=None):
+        self.make_input_pattern_constraints(alpha, Command.INPUT_ALPHA)
+        self.make_input_pattern_constraints(beta, Command.INPUT_BETA)
+        self.make_output_pattern_constraints(psi, Command.OUTPUT_PSI)
+        # self.make_output_pattern_constraints(omega, Command.OUTPUT_OMEGA)
 
  
     def make_waldo_location_constraints(self, waldo_locations: list[tuple[int, int, int]]):
