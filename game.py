@@ -50,6 +50,7 @@ class Atom():
 
         self.active = [model.NewBoolVar(f'atom_{id}_active_{t}') for t in rT]
         self.type = [model.NewIntVar(0, n_atom_types, f'atom{id}_type_{t}') for t in rT]
+        # self.type = model.NewIntVar(0, n_atom_types, f'atom{id}_type')
         # x and y are stored as integers
         self.x = [model.NewIntVar(0, reactor_width -1, f'atom_{id}_x_{t}') for t in rT]
         self.y = [model.NewIntVar(0, reactor_height-1, f'atom_{id}_y_{t}') for t in rT]
@@ -122,7 +123,7 @@ class Cell():
         self.waldo_grabbing = [model.NewBoolVar(f'cell_{x}_{y}_waldo_grabbing_{t}') for t in range(T)]
         self.command = [model.NewBoolVar(f'cell_{x}_{y}_command_{c}') for c in Command]
         self.arrow = [model.NewBoolVar(f'cell_{x}_{y}_arrow_{v}') for v in Movement]
-        self.bonds = [[model.NewBoolVar(f'cell_{x}_{y}_bond_{bond_dir}_{t}') for bond_dir in BondDir] for t in range(T)]
+        self.bonds = [[None for bond_dir in BondDir] for t in range(T)]
         self.bonder_directions = [model.NewBoolVar(f'cell_{x}_{y}_bonder_direction_{bond_dir}') for bond_dir in BondDir]
         self.BFS_depth = [model.NewIntVar(-1, max_bfs, f'cell_{x}_{y}_bfs_depth_{t}') for t in range(T)]
         self.BFS_depth_ge_1 = [model.NewBoolVar(f'cell_{x}_{y}_indirectly grabbed_{t}') for t in range(T)]
@@ -253,6 +254,10 @@ class SpacechemGame():
         self.n_active_atoms = [self.model.NewIntVar(0, max_atoms, f'n_active_atoms_{t}') for t in range(T)]
         self.cells:list[list[Cell]] = [[Cell(self.model, T, height, width, x, y, n_atom_types, max_atoms, max_bfs) for y in range(height)] for x in range(width)]
         self.waldos = [Waldo(self.model, T, id, height, width, max_atoms) for id in range(n_waldos)]
+        # bonds that go from (x,y) to (x+1,y)
+        self.bonds_horizontal = {(x,y,t):self.model.NewBoolVar(f'bonds_horizontal_{x}_{y}_{t}') for t in range(T) for x in range(-1, width) for y in range(height)}
+        # bonds that go from (x,y) to (x,y+1)
+        self.bonds_vertical = {(x,y,t):self.model.NewBoolVar(f'bonds_vertical_{x}_{y}_{t}') for t in range(T) for x in range(width) for y in range(-1, height)}
         self.bonders = [[self.model.NewBoolVar(f'bonder_{x}_{y}') for y in range(height)] for x in range(width)]
 
         # Used for loop constraint
@@ -270,8 +275,28 @@ class SpacechemGame():
     def atom(self, id):
         return self.atoms[id]
     
+    def make_cell_bonds(self):
+        for t in range(self.T):
+            for x in range(self.width):
+                for y in range(self.height):
+                    cell = self.cells[x][y]
+                    cell.bonds[t][Movement.U] = self.bonds_vertical[x,y,t]
+                    cell.bonds[t][Movement.D] = self.bonds_vertical[x,y-1,t]
+                    cell.bonds[t][Movement.R] = self.bonds_horizontal[x,y,t]
+                    cell.bonds[t][Movement.L] = self.bonds_horizontal[x-1,y,t]
+
+            for x in range(self.width):
+                self.model.Add(self.bonds_vertical[x,-1,t] == 0)
+                self.model.Add(self.bonds_vertical[x,self.height-1,t] == 0)
+            for y in range(self.height):
+                self.model.Add(self.bonds_horizontal[-1,y,t] == 0)
+                self.model.Add(self.bonds_horizontal[self.width-1,y,t] == 0)
+
+    
     def check(self):
         m = self.model
+
+        self.make_cell_bonds()
 
         m.Add(sum(self.bonders[x][y] for x in range(self.width) for y in range(self.height)) == self.n_bonders)
 
@@ -365,15 +390,6 @@ class SpacechemGame():
                                     atom.active[t], waldo.command[t][Command.BOND_MINUS], atom.bonder_directions[t][bond_dir])
 
 
-            # Check bonds between cells
-            for x in range(self.width):
-                for y in range(self.height):
-                    cell:Cell = self.cells[x][y]
-                    m.Add(cell.bonds[t][BondDir.L] == (self.cells[x-1][y].bonds[t][BondDir.R] if x > 0 else 0))
-                    m.Add(cell.bonds[t][BondDir.R] == (self.cells[x+1][y].bonds[t][BondDir.L] if x < self.width - 1 else 0))
-                    m.Add(cell.bonds[t][BondDir.D] == (self.cells[x][y-1].bonds[t][BondDir.U] if y > 0 else 0))
-                    m.Add(cell.bonds[t][BondDir.U] == (self.cells[x][y+1].bonds[t][BondDir.D] if y < self.height - 1 else 0))
-
             # Check BFS depth between cells
             for x in range(self.width):
                 for y in range(self.height):
@@ -406,6 +422,7 @@ class SpacechemGame():
                         # All this is needed for the cell.atom_id, cell.atom_type, and cell.occupied variables, plus checking bonds
                         m.Add(cell.atom_id[t] == atom.id).OnlyEnforceIf(atom_at_cell)
                         m.Add(cell.atom_type[t] == atom.type[t]).OnlyEnforceIf(atom_at_cell)
+                        # m.Add(cell.atom_type[t] == atom.type).OnlyEnforceIf(atom_at_cell)
                         # Stores whether an atom is new.
                         if t > 0 and cell.x < 4: # we only need to deal with new atoms in input zones
                                 m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA])
