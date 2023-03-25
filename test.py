@@ -365,16 +365,16 @@ def test_bond_minus():
     print(f"Bond- passed in {solver.WallTime():.3f} s")
 
 
-# test_nothing()
-# test_atom_BFS()
-# test_water_input()
-# test_CF4()
-# test_water_transport()
-# test_input_3_water()
-# test_input_output_neon()
-# test_loop_constraint()
+test_nothing()
+test_atom_BFS()
+test_water_input()
+test_CF4()
+test_water_transport()
+test_input_3_water()
+test_input_output_neon()
+test_loop_constraint()
 
-# test_bond_plus()
+test_bond_plus()
 test_bond_minus()
 
 

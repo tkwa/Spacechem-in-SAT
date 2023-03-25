@@ -30,8 +30,8 @@ class Command(IntEnum):
     BOND_PLUS = 3
     BOND_MINUS = 4
     INPUT_ALPHA = 5
-    # INPUT_BETA = 9
-    OUTPUT_PSI = 6
+    INPUT_BETA = 6
+    OUTPUT_PSI = 7
     # OUTPUT_OMEGA = 11
     # Still need to implement: flip flops, sense, fuse/split
 
@@ -315,11 +315,14 @@ class SpacechemGame():
             # Atoms cannot become active or inactive (except input alpha and output psi)
             if t > 0:
                 for atom in self.atoms:
-                    m.Add(atom.active[t] <= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not())
+                    m.Add(atom.active[t] <= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not(), self.waldos[0].command[t][Command.INPUT_BETA].Not())
                     m.Add(atom.active[t] >= atom.active[t-1]).OnlyEnforceIf(self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
-                self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA].Not(), self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
+                self.model.Add(self.n_active_atoms[t] == self.n_active_atoms[t-1]).OnlyEnforceIf(
+                    self.waldos[0].command[t][Command.INPUT_ALPHA].Not(),
+                    self.waldos[0].command[t][Command.INPUT_BETA].Not(),
+                    self.waldos[0].command[t-1][Command.OUTPUT_PSI].Not())
                 # Redundant constraint, hopefully this saves time
-                self.model.Add(self.n_active_atoms[t] >= self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA])
+                # self.model.Add(self.n_active_atoms[t] >= self.n_active_atoms[t-1]).OnlyEnforceIf(self.waldos[0].command[t][Command.INPUT_ALPHA])
             m.Add(sum(atom.active[t] for atom in self.atoms) == self.n_active_atoms[t])
 
             # No two active atoms have the same position
@@ -406,6 +409,7 @@ class SpacechemGame():
                         # Stores whether an atom is new.
                         if t > 0 and cell.x < 4: # we only need to deal with new atoms in input zones
                                 m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_ALPHA])
+                                m.Add(cell.atom_new[t] == atom.active[t-1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.INPUT_BETA])
                         if t < self.T - 1 and cell.x > 6:
                                 # atom_output can be undefined if cells are output on the last cycle. This seems ok...
                                 m.Add(cell.atom_output[t] == atom.active[t+1].Not()).OnlyEnforceIf(atom_at_cell, self.waldos[0].command[t][Command.OUTPUT_PSI])
@@ -603,7 +607,9 @@ class SpacechemGame():
         self.model.AddElement(self.t_loop_start, self.n_active_atoms, 0)
         self.model.AddElement(self.t_loop_end, self.n_active_atoms, 0)
 
-        self.model.AddElement(self.t_input, [self.waldos[0].command[t][Command.INPUT_ALPHA] for t in range(self.T)], 1)
+        # which_input = self.model.NewBoolVar("input_in_loop")
+        # self.model.AddElement(self.t_input, [self.waldos[0].command[t][Command.INPUT_ALPHA] for t in range(self.T)], 1).OnlyEnforceIf(which_input)
+        # self.model.AddElement(self.t_input, [self.waldos[0].command[t][Command.INPUT_BETA] for t in range(self.T)], 1).OnlyEnforceIf(which_input.Not())
         self.model.AddElement(self.t_output, [self.waldos[0].command[t][Command.OUTPUT_PSI] for t in range(self.T)], 1)
 
         # Waldo position and movement

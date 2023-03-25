@@ -9,6 +9,7 @@ class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         Command.GRAB: 'g',
         Command.DROP: 'd',
         Command.INPUT_ALPHA: 'α',
+        Command.INPUT_BETA: 'β',
         Command.OUTPUT_PSI: 'ψ',
         Command.BOND_PLUS: '⊕',
         Command.BOND_MINUS: '⊖',
